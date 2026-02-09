@@ -1,0 +1,6 @@
+@ImportService_HostAddress = http://localhost:5082
+
+GET {{ImportService_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
