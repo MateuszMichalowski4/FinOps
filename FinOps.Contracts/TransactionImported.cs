@@ -1,4 +1,6 @@
-﻿namespace FinOps.Contracts;
+﻿using System;
+
+namespace FinOps.Contracts;
 
 public record TransactionImported(
     Guid EventId,
