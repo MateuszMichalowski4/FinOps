@@ -1,13 +1,14 @@
+using Confluent.Kafka;
+using FinOps.Contracts;
+using System.Text.Json;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -16,29 +17,43 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+var kafkaBootstrap =
+    Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") ?? "localhost:29092";
+
+var producerConfig = new ProducerConfig
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+    BootstrapServers = kafkaBootstrap,
+    Acks = Acks.All
 };
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+using var producer = new ProducerBuilder<string, string>(producerConfig).Build();
+
+app.MapPost("/debug/publish", async () =>
+    {
+        var evt = new TransactionImported(
+            EventId: Guid.NewGuid(),
+            OccurredAt: DateTimeOffset.UtcNow,
+            TransactionId: Guid.NewGuid(),
+            UserId: "user-1",
+            Amount: 42.50m,
+            Currency: "PLN",
+            Merchant: "Zabka",
+            BookedAt: DateTimeOffset.UtcNow
+        );
+
+        var json = JsonSerializer.Serialize(evt);
+
+        await producer.ProduceAsync(
+            "finops.transaction.imported",
+            new Message<string, string>
+            {
+                Key = evt.UserId,
+                Value = json
+            });
+
+        return Results.Ok(evt);
+    })
+    .WithName("PublishTransactionImported")
+    .WithOpenApi();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
