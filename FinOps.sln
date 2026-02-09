@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImportService", "ImportServ
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CategorizationService", "CategorizationService\CategorizationService.csproj", "{18595166-3200-42B8-BD31-225CA54ACBBC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FinOps.Contracts", "FinOps.Contracts\FinOps.Contracts.csproj", "{8079A04B-6B9D-438D-8D2B-24DE60A83C06}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{18595166-3200-42B8-BD31-225CA54ACBBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{18595166-3200-42B8-BD31-225CA54ACBBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{18595166-3200-42B8-BD31-225CA54ACBBC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8079A04B-6B9D-438D-8D2B-24DE60A83C06}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8079A04B-6B9D-438D-8D2B-24DE60A83C06}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8079A04B-6B9D-438D-8D2B-24DE60A83C06}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8079A04B-6B9D-438D-8D2B-24DE60A83C06}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
