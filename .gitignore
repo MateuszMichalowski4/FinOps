@@ -1,33 +1,31 @@
+ImportService/bin/**
+CategorizationService/bin/**
 
-bin/
-obj/
+# build
 **/bin/
 **/obj/
 
+# tests
+TestResults/
+coverage/
 
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-
-
+# IDE
 .idea/
 .vs/
 .vscode/
+*.DotSettings.user
 
-
+# user / system
+*.user
+*.suo
+*.log
 .DS_Store
 Thumbs.db
 
+# env / local config
 .env
 docker-compose.override.yml
 
-*.log
-
+# appsettings
 appsettings.*.json
 !appsettings.json
-
-*.DotSettings.user
-
-TestResults/
-coverage/
