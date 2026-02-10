@@ -1,11 +1,8 @@
-namespace ImportService.Data;
-
+namespace CategorizationService.Data;
 
 public class TransactionEntity
 {
     public Guid Id { get; set; }
-    public string? CategoryId { get; set; }
-    public double? CategoryConfidence { get; set; }
     public string UserId { get; set; } = default!;
     public decimal Amount { get; set; }
     public string Currency { get; set; } = default!;
