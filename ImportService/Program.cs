@@ -3,6 +3,7 @@ using Confluent.Kafka;
 using FinOps.Contracts;
 using System.Text.Json;
 using ImportService.Data;
+using ImportService.Workers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -19,13 +20,10 @@ builder.Services.AddDbContext<ImportDbContext>(opt =>
         builder.Configuration.GetConnectionString("Postgres")
         ?? "Host=localhost;Port=5432;Database=finops;Username=finops;Password=finops"));
 
-var app = builder.Build();
+builder.Services.AddHostedService<CategoryAssignedConsumer>();
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<ImportDbContext>();
-    db.Database.Migrate();
-}
+
+var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
@@ -46,32 +44,43 @@ var producerConfig = new ProducerConfig
 
 using var producer = new ProducerBuilder<string, string>(producerConfig).Build();
 
-app.MapPost("/debug/publish", async () =>
+app.MapPost("/debug/publish", async (ImportDbContext db) =>
+{
+    var txId = Guid.NewGuid();
+
+    var tx = new TransactionEntity
     {
-        var evt = new TransactionImported(
-            EventId: Guid.NewGuid(),
-            OccurredAt: DateTimeOffset.UtcNow,
-            TransactionId: Guid.NewGuid(),
-            UserId: "user-1",
-            Amount: 42.50m,
-            Currency: "PLN",
-            Merchant: "Zabka",
-            BookedAt: DateTimeOffset.UtcNow
-        );
+        Id = txId,
+        UserId = "user-1",
+        Amount = 42.50m,
+        Currency = "PLN",
+        Merchant = "Zabka",
+        BookedAt = DateTimeOffset.UtcNow,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
 
-        var json = JsonSerializer.Serialize(evt);
+    db.Transactions.Add(tx);
+    await db.SaveChangesAsync();
 
-        await producer.ProduceAsync(
-            "finops.transaction.imported",
-            new Message<string, string>
-            {
-                Key = evt.UserId,
-                Value = json
-            });
+    var evt = new TransactionImported(
+        EventId: Guid.NewGuid(),
+        OccurredAt: DateTimeOffset.UtcNow,
+        TransactionId: txId,
+        UserId: tx.UserId,
+        Amount: tx.Amount,
+        Currency: tx.Currency,
+        Merchant: tx.Merchant,
+        BookedAt: tx.BookedAt
+    );
 
-        return Results.Ok(evt);
-    })
-    .WithName("PublishTransactionImported")
-    .WithOpenApi();
+    var json = JsonSerializer.Serialize(evt);
+
+    await producer.ProduceAsync(
+        "finops.transaction.imported",
+        new Message<string, string> { Key = evt.UserId, Value = json });
+
+    return Results.Ok(evt);
+});
+
 
 app.Run();
