@@ -29,3 +29,5 @@ docker-compose.override.yml
 # appsettings
 appsettings.*.json
 !appsettings.json
+
+**/appsettings.Development.json
