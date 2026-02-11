@@ -1,0 +1,31 @@
+name: db-migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to apply migrations"
+        type: choice
+        required: true
+        options: [ staging, prod ]
+
+jobs:
+  migrate-importservice:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+
+    env:
+      ConnectionStrings__Postgres: ${{ secrets.POSTGRES_CS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef
+
+      - name: Apply migrations (ImportService)
+        run: dotnet ef database update --project FinOps/ImportService

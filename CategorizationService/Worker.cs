@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Confluent.Kafka;
 using FinOps.Contracts;
+using CategorizationService.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -8,10 +10,12 @@ namespace CategorizationService;
 
 public class Worker : BackgroundService
 {
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<Worker> _logger;
 
-    public Worker(ILogger<Worker> logger)
+    public Worker(IServiceScopeFactory scopeFactory, ILogger<Worker> logger)
     {
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -24,7 +28,7 @@ public class Worker : BackgroundService
             BootstrapServers = bootstrap,
             GroupId = "categorization-v1",
             AutoOffsetReset = AutoOffsetReset.Earliest,
-            EnableAutoCommit = true
+            EnableAutoCommit = false
         };
 
         var producerConfig = new ProducerConfig
@@ -43,42 +47,110 @@ public class Worker : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                var cr = consumer.Consume(stoppingToken);
+                ConsumeResult<string, string>? cr;
 
-                var evt = JsonSerializer.Deserialize<TransactionImported>(cr.Message.Value);
-                if (evt is null) continue;
+                try
+                {
+                    cr = consumer.Consume(TimeSpan.FromMilliseconds(500));
+                }
+                catch (ConsumeException ex)
+                {
+                    _logger.LogError(ex, "Kafka consume error");
+                    continue;
+                }
 
-                var (categoryId, confidence) = Categorize(evt);
+                if (cr?.Message?.Value is null) continue;
 
-                var outEvent = new CategoryAssigned(
-                    EventId: Guid.NewGuid(),
-                    OccurredAt: DateTimeOffset.UtcNow,
-                    TransactionId: evt.TransactionId,
-                    UserId: evt.UserId,
-                    CategoryId: categoryId,
-                    Confidence: confidence,
-                    SchemaVersion: 1
-                );
+                TransactionImported? evt;
+                try
+                {
+                    evt = JsonSerializer.Deserialize<TransactionImported>(cr.Message.Value);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "Invalid JSON (skipping)");
+                    consumer.Commit(cr);
+                    continue;
+                }
 
-                var json = JsonSerializer.Serialize(outEvent);
+                if (evt is null)
+                {
+                    consumer.Commit(cr);
+                    continue;
+                }
 
-                await producer.ProduceAsync(
-                    "finops.category.assigned",
-                    new Message<string, string>
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<CategorizationDbContext>();
+
+                    var alreadyEvent = await db.ProcessedEvents.AnyAsync(x => x.EventId == evt.EventId, stoppingToken);
+                    if (alreadyEvent)
                     {
-                        Key = evt.UserId,
-                        Value = json
-                    },
-                    stoppingToken);
+                        consumer.Commit(cr);
+                        continue;
+                    }
 
-                _logger.LogInformation(
-                    "CategoryAssigned published. tx={TransactionId} user={UserId} cat={CategoryId} conf={Confidence}",
-                    evt.TransactionId, evt.UserId, categoryId, confidence);
+                    var existing = await db.CategoryAssignments.AsNoTracking()
+                        .FirstOrDefaultAsync(x => x.TransactionId == evt.TransactionId, stoppingToken);
+
+                    if (existing is not null)
+                    {
+                        db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.EventId });
+                        await db.SaveChangesAsync(stoppingToken);
+
+                        consumer.Commit(cr);
+                        continue;
+                    }
+
+                    var (categoryId, confidence) = Categorize(evt);
+
+                    var outEvent = new CategoryAssigned(
+                        EventId: Guid.NewGuid(),
+                        OccurredAt: DateTimeOffset.UtcNow,
+                        TransactionId: evt.TransactionId,
+                        UserId: evt.UserId,
+                        CategoryId: categoryId,
+                        Confidence: confidence,
+                        CorrelationId: evt.CorrelationId,
+                        SchemaVersion: 1
+                    );
+
+                    db.CategoryAssignments.Add(new CategoryAssignmentEntity
+                    {
+                        TransactionId = evt.TransactionId,
+                        UserId = evt.UserId,
+                        CategoryId = categoryId,
+                        Confidence = confidence,
+                        EventId = outEvent.EventId,
+                        CorrelationId = evt.CorrelationId
+                    });
+
+                    db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.EventId });
+
+                    await db.SaveChangesAsync(stoppingToken);
+
+                    await producer.ProduceAsync(
+                        "finops.category.assigned",
+                        new Message<string, string>
+                        {
+                            Key = evt.UserId,
+                            Value = JsonSerializer.Serialize(outEvent)
+                        },
+                        stoppingToken);
+
+                    consumer.Commit(cr);
+                }
+                catch (DbUpdateException ex)
+                {
+                    _logger.LogWarning(ex, "DB conflict (idempotency). Will commit. tx={TransactionId}", evt.TransactionId);
+                    consumer.Commit(cr);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Processing failed; will retry. offset={Offset}", cr.Offset);
+                }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // shutdown
         }
         finally
         {
@@ -92,6 +164,7 @@ public class Worker : BackgroundService
 
         if (merchant.Contains("zabka")) return ("groceries", 0.90);
         if (merchant.Contains("uber") || merchant.Contains("bolt")) return ("transport", 0.90);
+        if (merchant.Contains("orlen")) return ("fuel", 0.90);
         if (merchant.Contains("netflix") || merchant.Contains("spotify")) return ("subscriptions", 0.85);
 
         return ("uncategorized", 0.50);
