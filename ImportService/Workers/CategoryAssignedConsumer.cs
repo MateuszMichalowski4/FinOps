@@ -1,8 +1,7 @@
 using System.Text.Json;
 using Confluent.Kafka;
 using FinOps.Contracts;
-using ImportService.Data;
-using Microsoft.EntityFrameworkCore;
+using ImportService.Handlers;
 
 namespace ImportService.Workers;
 
@@ -23,27 +22,26 @@ public class CategoryAssignedConsumer : BackgroundService
 
         var bootstrap = Environment.GetEnvironmentVariable("KAFKA_BOOTSTRAP_SERVERS") ?? "localhost:29092";
 
-        var consumerConfig = new ConsumerConfig
+        var cfg = new ConsumerConfig
         {
             BootstrapServers = bootstrap,
             GroupId = "import-category-updater-v1",
-            AutoOffsetReset = AutoOffsetReset.Latest,
-            EnableAutoCommit = true
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = false
         };
 
-        using var consumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
+        using var consumer = new ConsumerBuilder<string, string>(cfg).Build();
         consumer.Subscribe("finops.category.assigned");
-        _logger.LogInformation("ImportService consumer started. Listening on finops.category.assigned");
+
+        _logger.LogInformation("Listening on finops.category.assigned");
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                ConsumeResult<string, string>? cr = null;
-
+                ConsumeResult<string, string>? cr;
                 try
                 {
-                    // krótkie timeouty = brak wiecznego blokowania
                     cr = consumer.Consume(TimeSpan.FromMilliseconds(500));
                 }
                 catch (ConsumeException ex)
@@ -61,27 +59,30 @@ public class CategoryAssignedConsumer : BackgroundService
                 }
                 catch (JsonException ex)
                 {
-                    _logger.LogError(ex, "Invalid JSON");
+                    _logger.LogError(ex, "Invalid JSON (skipping)");
+                    consumer.Commit(cr);
                     continue;
                 }
 
-                if (evt is null) continue;
-
-                using var scope = _scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<ImportDbContext>();
-
-                var tx = await db.Transactions.FirstOrDefaultAsync(x => x.Id == evt.TransactionId, stoppingToken);
-                if (tx is null)
+                if (evt is null)
                 {
-                    _logger.LogWarning("Transaction not found. tx={TransactionId}", evt.TransactionId);
+                    consumer.Commit(cr);
                     continue;
                 }
 
-                tx.CategoryId = evt.CategoryId;
-                tx.CategoryConfidence = evt.Confidence;
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var handler = scope.ServiceProvider.GetRequiredService<CategoryAssignedHandler>();
 
-                await db.SaveChangesAsync(stoppingToken);
-                _logger.LogInformation("Transaction updated. tx={TransactionId} cat={CategoryId}", evt.TransactionId, evt.CategoryId);
+                    await handler.HandleAsync(evt, stoppingToken);
+
+                    consumer.Commit(cr);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Handler failed; will retry. offset={Offset}", cr.Offset);
+                }
             }
         }
         finally

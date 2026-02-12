@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  build-test-migrate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: finops
+          POSTGRES_USER: finops
+          POSTGRES_PASSWORD: finops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U finops -d finops"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      ConnectionStrings__Postgres: Host=localhost;Port=5432;Database=finops;Username=finops;Password=finops
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Install EF tools
+        run: dotnet tool install --global dotnet-ef
+
+      - name: Apply migrations (ImportService)
+        run: dotnet ef database update --project FinOps/ImportService
+
+      - name: Test
+        run: dotnet test -c Release --no-build

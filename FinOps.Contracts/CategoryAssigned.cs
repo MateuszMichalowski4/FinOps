@@ -9,5 +9,6 @@ public record CategoryAssigned(
     string UserId,
     string CategoryId,
     double Confidence,
+    Guid? CorrelationId = null,
     int SchemaVersion = 1
 );
