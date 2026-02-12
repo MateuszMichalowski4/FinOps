@@ -41,7 +41,7 @@ public class OutboxPublisher : BackgroundService
                     await Task.Delay(500, stoppingToken);
                     continue;
                 }
-//
+
                 foreach (var msg in batch)
                 {
                     try
