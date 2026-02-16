@@ -1,4 +1,4 @@
-namespace ImportService.Data;
+namespace ImportService.Data.Entities;
 
 public class ProcessedEvent
 {

@@ -1,3 +1,4 @@
+using ImportService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace ImportService.Data;
@@ -9,6 +10,7 @@ public class ImportDbContext : DbContext
     public DbSet<TransactionEntity> Transactions => Set<TransactionEntity>();
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
     public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
+    public DbSet<ImportJobEntity> ImportJobs => Set<ImportJobEntity>(); // NEW
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -20,6 +22,20 @@ public class ImportDbContext : DbContext
             b.HasIndex(x => x.UserId);
             b.HasIndex(x => x.BookedAt);
             b.HasIndex(x => new { x.UserId, x.BookedAt });
+
+            b.HasIndex(x => new { x.UserId, x.ExternalTransactionId })
+                .IsUnique()
+                .HasFilter("\"ExternalTransactionId\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ImportJobEntity>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.UserId);
+            b.HasIndex(x => x.CreatedAt);
+            b.Property(x => x.Status).HasConversion<string>();
+            b.Property(x => x.FilePath).IsRequired();
+            b.Property(x => x.RowVersion).IsRowVersion();
         });
 
         modelBuilder.Entity<OutboxMessage>(b =>
@@ -31,7 +47,7 @@ public class ImportDbContext : DbContext
             b.Property(x => x.Key).IsRequired();
             b.Property(x => x.Payload).IsRequired();
         });
-        
+
         modelBuilder.Entity<ProcessedEvent>(b =>
         {
             b.HasKey(x => x.EventId);
