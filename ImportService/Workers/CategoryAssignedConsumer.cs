@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Confluent.Kafka;
 using FinOps.Contracts;
 using ImportService.Handlers;
@@ -31,9 +30,9 @@ public class CategoryAssignedConsumer : BackgroundService
         };
 
         using var consumer = new ConsumerBuilder<string, string>(cfg).Build();
-        consumer.Subscribe("finops.category.assigned");
+        consumer.Subscribe(Topics.CategoryAssigned);
 
-        _logger.LogInformation("Listening on finops.category.assigned");
+        _logger.LogInformation("Listening on {Topic}", Topics.CategoryAssigned);
 
         try
         {
@@ -52,20 +51,17 @@ public class CategoryAssignedConsumer : BackgroundService
 
                 if (cr?.Message?.Value is null) continue;
 
-                CategoryAssigned? evt;
-                try
+                var evt = Json.Deserialize<CategoryAssigned>(cr.Message.Value);
+                if (evt is null)
                 {
-                    evt = JsonSerializer.Deserialize<CategoryAssigned>(cr.Message.Value);
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogError(ex, "Invalid JSON (skipping)");
+                    _logger.LogError("Invalid JSON (null). Skipping.");
                     consumer.Commit(cr);
                     continue;
                 }
 
-                if (evt is null)
+                if (evt.TransactionId == Guid.Empty)
                 {
+                    _logger.LogError("Invalid CategoryAssigned (empty TransactionId). eventId={EventId}", evt.EventId);
                     consumer.Commit(cr);
                     continue;
                 }

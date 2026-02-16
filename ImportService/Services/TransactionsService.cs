@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FinOps.Contracts;
 using ImportService.Data;
+using ImportService.Data.Entities;
 using ImportService.Dtos;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,7 +18,6 @@ public class TransactionsService : ITransactionsService
 
     public async Task ImportAsync(IEnumerable<TransactionImportRequest> items, CancellationToken ct)
     {
-        // 1 correlationId na cały batch/import request
         var correlationId = Guid.NewGuid();
 
         foreach (var item in items)
@@ -50,19 +50,19 @@ public class TransactionsService : ITransactionsService
 
             var headers = new Dictionary<string, string>
             {
-                ["x-event-id"] = evt.EventId.ToString(),
-                ["x-correlation-id"] = correlationId.ToString(),
-                ["x-schema-version"] = evt.SchemaVersion.ToString(),
-                ["x-service"] = "import-service"
+                [EventHeaders.EventId] = evt.EventId.ToString(),
+                [EventHeaders.CorrelationId] = correlationId.ToString(),
+                [EventHeaders.SchemaVersion] = evt.SchemaVersion.ToString(),
+                [EventHeaders.Service] = "import-service"
             };
 
             _db.Outbox.Add(new OutboxMessage
             {
                 OccurredAt = evt.OccurredAt,
-                Topic = "finops.transaction.imported",
+                Topic = Topics.TransactionImported,
                 Key = item.UserId,
-                Payload = JsonSerializer.Serialize(evt),
-                HeadersJson = JsonSerializer.Serialize(headers),
+                Payload = Json.Serialize(evt),
+                HeadersJson = Json.Serialize(headers),
                 SchemaVersion = evt.SchemaVersion
             });
         }

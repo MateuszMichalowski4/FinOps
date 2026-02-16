@@ -11,6 +11,8 @@ public record TransactionImported(
     string Currency,
     string Merchant,
     DateTimeOffset BookedAt,
+    string? AccountId = null,
+    string? ExternalTransactionId = null,
     Guid? CorrelationId = null,
-    int SchemaVersion = 1
+    int SchemaVersion = 2
 );

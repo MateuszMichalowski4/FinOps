@@ -5,12 +5,19 @@ using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+
 builder.Services.AddDbContext<CategorizationDbContext>(opt =>
     opt.UseNpgsql(
-        builder.Configuration.GetConnectionString("Postgres")
-        ?? "Host=localhost;Port=5432;Database=finops;Username=finops;Password=finops"));
+       builder.Configuration.GetConnectionString("Postgres")));
 
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
+
+using (var scope = host.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CategorizationDbContext>();
+    db.Database.Migrate();
+}
+
 host.Run();

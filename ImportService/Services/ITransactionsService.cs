@@ -1,4 +1,5 @@
 using ImportService.Data;
+using ImportService.Data.Entities;
 using ImportService.Dtos;
 
 namespace ImportService.Services;

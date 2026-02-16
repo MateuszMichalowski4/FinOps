@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Text;
 using Confluent.Kafka;
 using FinOps.Contracts;
 using CategorizationService.Data;
@@ -40,8 +40,8 @@ public class Worker : BackgroundService
         using var consumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
         using var producer = new ProducerBuilder<string, string>(producerConfig).Build();
 
-        consumer.Subscribe("finops.transaction.imported");
-        _logger.LogInformation("CategorizationService started. Listening on finops.transaction.imported");
+        consumer.Subscribe(Topics.TransactionImported);
+        _logger.LogInformation("CategorizationService started. Listening on {Topic}", Topics.TransactionImported);
 
         try
         {
@@ -61,30 +61,26 @@ public class Worker : BackgroundService
 
                 if (cr?.Message?.Value is null) continue;
 
-                TransactionImported? evt;
-                try
-                {
-                    evt = JsonSerializer.Deserialize<TransactionImported>(cr.Message.Value);
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogError(ex, "Invalid JSON (skipping)");
-                    consumer.Commit(cr);
-                    continue;
-                }
+                var headersIn = cr.Message.Headers;
+                var headerEventId = headersIn.GetGuid(EventHeaders.EventId);
+                var headerCorrelationId = headersIn.GetGuid(EventHeaders.CorrelationId);
 
+                var evt = Json.Deserialize<TransactionImported>(cr.Message.Value);
                 if (evt is null)
                 {
                     consumer.Commit(cr);
                     continue;
                 }
 
+                var effectiveEventId = headerEventId ?? evt.EventId;
+                var effectiveCorrelationId = headerCorrelationId ?? evt.CorrelationId;
+
                 try
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<CategorizationDbContext>();
 
-                    var alreadyEvent = await db.ProcessedEvents.AnyAsync(x => x.EventId == evt.EventId, stoppingToken);
+                    var alreadyEvent = await db.ProcessedEvents.AnyAsync(x => x.EventId == effectiveEventId, stoppingToken);
                     if (alreadyEvent)
                     {
                         consumer.Commit(cr);
@@ -96,7 +92,7 @@ public class Worker : BackgroundService
 
                     if (existing is not null)
                     {
-                        db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.EventId });
+                        db.ProcessedEvents.Add(new ProcessedEvent { EventId = effectiveEventId });
                         await db.SaveChangesAsync(stoppingToken);
 
                         consumer.Commit(cr);
@@ -112,7 +108,7 @@ public class Worker : BackgroundService
                         UserId: evt.UserId,
                         CategoryId: categoryId,
                         Confidence: confidence,
-                        CorrelationId: evt.CorrelationId,
+                        CorrelationId: effectiveCorrelationId,
                         SchemaVersion: 1
                     );
 
@@ -123,19 +119,27 @@ public class Worker : BackgroundService
                         CategoryId = categoryId,
                         Confidence = confidence,
                         EventId = outEvent.EventId,
-                        CorrelationId = evt.CorrelationId
+                        CorrelationId = effectiveCorrelationId
                     });
 
-                    db.ProcessedEvents.Add(new ProcessedEvent { EventId = evt.EventId });
+                    db.ProcessedEvents.Add(new ProcessedEvent { EventId = effectiveEventId });
 
                     await db.SaveChangesAsync(stoppingToken);
 
+                    var headersOut = new Headers();
+                    headersOut.Add(EventHeaders.EventId, Encoding.UTF8.GetBytes(outEvent.EventId.ToString()));
+                    if (outEvent.CorrelationId is not null)
+                        headersOut.Add(EventHeaders.CorrelationId, Encoding.UTF8.GetBytes(outEvent.CorrelationId.Value.ToString()));
+                    headersOut.Add(EventHeaders.SchemaVersion, Encoding.UTF8.GetBytes(outEvent.SchemaVersion.ToString()));
+                    headersOut.Add(EventHeaders.Service, Encoding.UTF8.GetBytes("categorization-service"));
+
                     await producer.ProduceAsync(
-                        "finops.category.assigned",
+                        Topics.CategoryAssigned,
                         new Message<string, string>
                         {
                             Key = evt.UserId,
-                            Value = JsonSerializer.Serialize(outEvent)
+                            Value = Json.Serialize(outEvent),
+                            Headers = headersOut
                         },
                         stoppingToken);
 
